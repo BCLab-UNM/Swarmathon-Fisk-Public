@@ -12,6 +12,9 @@ class SearchController : virtual Controller {
 
 public:
 
+int static caseTurn; //edited
+int static counter;  //edited
+
   SearchController();
 
   void Reset() override;

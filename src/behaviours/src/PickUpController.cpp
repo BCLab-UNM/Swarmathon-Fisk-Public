@@ -2,8 +2,7 @@
 #include <limits> // For numeric limits
 #include <cmath> // For hypot
 
-PickUpController::PickUpController()
-{
+PickUpController::PickUpController() {
   lockTarget = false;
   timeOut = false;
   nTargetsSeen = 0;
@@ -20,54 +19,41 @@ PickUpController::PickUpController()
   result.PIDMode = SLOW_PID;
 }
 
-PickUpController::~PickUpController() { /*Destructor*/  }
+PickUpController::~PickUpController() {
+}
 
-void PickUpController::SetTagData(vector<Tag> tags)
-{
+void PickUpController::SetTagData(vector<TagPoint> tags) {
 
-  if (tags.size() > 0)
-  {
+  if (tags.size() > 0) {
 
     nTargetsSeen = tags.size();
 
-    //we saw a target, set target_timer
-    target_timer = current_time;
-
     double closest = std::numeric_limits<double>::max();
     int target  = 0;
+    for (int i = 0; i < tags.size(); i++) { //this loop selects the closest visible block to makes goals for it
 
-    //this loop selects the closest visible block to makes goals for it
-    for (int i = 0; i < tags.size(); i++)
-    {
-
-      if (tags[i].getID() == 0)
-      {
+      if (tags[i].id == 0) {
 
         targetFound = true;
 
-        //absolute distance to block from camera lens
-        double test = hypot(hypot(tags[i].getPositionX(), tags[i].getPositionY()), tags[i].getPositionZ());
-
+        double test = hypot(hypot(tags[i].x, tags[i].y), tags[i].z); //absolute distance to block from camera lens
         if (closest > test)
         {
           target = i;
           closest = test;
         }
       }
-      else
-      {
-        // If the center is seen, then don't try to pick up the cube.
-        if(tags[i].getID() == 256)
+      else {
+        nTargetsSeen--;
+
+        if(tags[i].id == 256)
         {
-
           Reset();
-
           if (has_control)
           {
             cout << "pickup reset return interupt free" << endl;
             release_control = true;
           }
-
           return;
         }
       }
@@ -75,41 +61,20 @@ void PickUpController::SetTagData(vector<Tag> tags)
 
     float cameraOffsetCorrection = 0.023; //meters;
 
-    // using a^2 + b^2 = c^2 to find the distance to the block
-    // 0.195 is the height of the camera lens above the ground in cm.
-    //
-    // a is the linear distance from the robot to the block, c is the
-    // distance from the camera lens, and b is the height of the
-    // camera above the ground.
-    blockDistanceFromCamera = hypot(hypot(tags[target].getPositionX(), tags[target].getPositionY()), tags[target].getPositionZ());
+    blockYawError = atan((tags[target].x + cameraOffsetCorrection)/blockDistance)*1.05; //angle to block from bottom center of chassis on the horizontal.
 
-    if ( (blockDistanceFromCamera*blockDistanceFromCamera - 0.195*0.195) > 0 )
-    {
-      blockDistance = sqrt(blockDistanceFromCamera*blockDistanceFromCamera - 0.195*0.195);
-    }
-    else
-    {
-      float epsilon = 0.00001; // A small non-zero positive number
-      blockDistance = epsilon;
-    }
+    ///TODO: Explain the trig going on here- blockDistance is c, 0.195 is b; find a
+    blockDistance = hypot(tags[target].z, tags[target].y); //distance from bottom center of chassis ignoring height.
 
-    //cout << "blockDistance  TAGDATA:  " << blockDistance << endl;
-
-    blockYawError = atan((tags[target].getPositionX() + cameraOffsetCorrection)/blockDistance)*1.05; //angle to block from bottom center of chassis on the horizontal.
-
-    cout << "blockYawError TAGDATA:  " << blockYawError << endl;
-
+    blockDistanceFromCamera = hypot(hypot(tags[target].x, tags[target].y), tags[target].z);
   }
 
 }
 
 
-bool PickUpController::SetSonarData(float rangeCenter)
-{
-  // If the center ultrasound sensor is blocked by a very close
-  // object, then a cube has been successfully lifted.
-  if (rangeCenter < 0.12 && targetFound)
-  {
+bool PickUpController::SetSonarData(float rangeCenter){
+
+  if (rangeCenter < 0.12 && targetFound) {
     result.type = behavior;
     result.b = nextProcess;
     result.reset = true;
@@ -121,38 +86,37 @@ bool PickUpController::SetSonarData(float rangeCenter)
 
 }
 
-void PickUpController::ProcessData()
-{
-
-  if(!targetFound)
-  {
-    //cout << "PICKUP No Target Seen!" << endl;
-
+void PickUpController::ProcessData() {
+  if(!targetFound){
     // Do nothing
     return;
   }
 
+  if ( (blockDistance*blockDistance - 0.195*0.195) > 0 )
+  {
+    blockDistance = sqrt(blockDistance*blockDistance - 0.195*0.195);
+  }
+  else
+  {
+    float epsilon = 0.000001; // A small non-zero positive number
+    blockDistance = epsilon;
+  }
+
+  //if target is close enough
   //diffrence between current time and millisecond time
   long int Tdiff = current_time - millTimer;
   float Td = Tdiff/1e3;
 
-  //cout << "PICKUP Target Seen!" << endl;
+  cout << "distance : " << blockDistanceFromCamera << " time is : " << Td << endl;
 
-  //cout << "distance : " << blockDistanceFromCamera << " time is : " << Td << endl;
+  if (blockDistanceFromCamera < 0.14 && Td < 2.9) {
 
-  // If the block is very close to the camera then the robot has
-  // successfully lifted a target. Enter the target held state to
-  // return to the center.
-  if (blockDistanceFromCamera < 0.14 && Td < 3.9)
-  {
     result.type = behavior;
     result.b = nextProcess;
     result.reset = true;
     targetHeld = true;
   }
-  //Lower wrist and open fingers if no locked target -- this is the
-  //case if the robot lost tracking, or missed the cube when
-  //attempting to pick it up.
+  //Lower wrist and open fingers if no locked target
   else if (!lockTarget)
   {
     //set gripper;
@@ -166,7 +130,6 @@ bool PickUpController::ShouldInterrupt(){
 
   ProcessData();
 
-  // saw center tags, so don't try to pick up the cube.
   if (release_control)
   {
     release_control = false;
@@ -174,34 +137,29 @@ bool PickUpController::ShouldInterrupt(){
     return true;
   }
 
-  if ((targetFound && !interupted) || targetHeld)
-  {
+  if ((targetFound && !interupted) || targetHeld) {
     interupted = true;
     has_control = false;
     return true;
   }
-  else if (!targetFound && interupted)
-  {
-    // had a cube in sight but lost it, interrupt again to release control
+  else if (!targetFound && interupted) {
     interupted = false;
     has_control = false;
     return true;
   }
-  else
-  {
+  else {
     return false;
   }
 }
 
-Result PickUpController::DoWork()
-{
+Result PickUpController::DoWork() {
 
   has_control = true;
 
-  if (!targetHeld)
-  {
+  if (!targetHeld) {
     //threshold distance to be from the target block before attempting pickup
-    float targetDistance = 0.15; //meters
+    float targetDistance = 0.25; //meters
+
 
     // -----------------------------------------------------------
     // millisecond time = current time if not in a counting state
@@ -219,14 +177,14 @@ Result PickUpController::DoWork()
     // During the pre-programmed pickup routine, a current value of "Td" is used to progress through
     // the routine. "Td" is defined below...
     // -----------------------------------------------------------
-    if (!timeOut) millTimer = current_time;
+    	if (!timeOut) millTimer = current_time;
 
     //difference between current time and millisecond time
-    long int Tdifference = current_time - millTimer;
+   	 long int Tdifference = current_time - millTimer;
 
     // converts from a millisecond difference to a second difference
     // Td = [T]ime [D]ifference IN SECONDS
-    float Td = Tdifference/1e3;
+    	float Td = Tdifference/1e3;
 
     // The following nested if statement implements a time based pickup routine.
     // The sequence of events is:
@@ -240,36 +198,24 @@ Result PickUpController::DoWork()
     // If we don't see any blocks or cubes turn towards the location of the last cube we saw.
     // I.E., try to re-aquire the last cube we saw.
 
-    float grasp_time_begin = 1.5;
-    float raise_time_begin = 2.0;
-    float lower_gripper_time_begin = 4.0;
-    float target_reaquire_begin= 4.2;
-    float target_pickup_task_time_limit = 4.8;
-
-    //cout << "blockDistance DOWORK:  " << blockDistance << endl;
-
-    //Calculate time difference between last seen tag
-    float target_timeout = (current_time - target_timer)/1e3;
-
-    //delay between the camera refresh and rover runtime is 6/10's of a second
-    float target_timeout_limit = 0.61;
-
-    //Timer to deal with delay in refresh from camera and the runtime of rover code
-    if( target_timeout >= target_timeout_limit )
-    {
-        //Has to be set back to 0
-        nTargetsSeen = 0;
-    }
-
+    	float grasp_time_begin = 1.7;
+    	float raise_time_begin = 2.5;
+    	float lower_gripper_time_begin = 4.0;
+    	float target_reaquire_begin= 4.2;
+    	float target_pickup_task_time_limit = 8.8; // was 4.8 *****************************************************************************************
     
     if (nTargetsSeen == 0 && !lockTarget)
     {
-      // This if statement causes us to time out if we don't re-aquire a block within the time limit.
+      	// This if statement causes us to time out if we don't re-aquire a block within the time limit.
+	
+	//added this line as an attempt to see if rover stops immediately a target is spotted.	
+	result.pd.cmdVel = 0.0;
+
       if(!timeOut)
       {
         result.pd.cmdVel = 0.0;
         result.pd.cmdAngularError= 0.0;
-        result.wristAngle = 1.25;
+        result.wristAngle = 0.8;
         // result.fingerAngle does not need to be set here
 
         // We are getting ready to start the pre-programmed pickup routine now! Maybe? <(^_^)/"
@@ -284,34 +230,34 @@ Result PickUpController::DoWork()
       else if (Td > 1.0 && Td < target_pickup_task_time_limit)
       {
         // The rover will reverse straight backwards without turning.
-        result.pd.cmdVel = -0.15;
+        result.pd.cmdVel = -0.05;// Changed this number from -0.15 to -0.05 to see how far the rover reverses after it spots a target 8*********************************************************************8
         result.pd.cmdAngularError= 0.0;
       }
     }
     else if (blockDistance > targetDistance && !lockTarget) //if a target is detected but not locked, and not too close.
     {
       // this is a 3-line P controller, where Kp = 0.20
-      float vel = blockDistance * 0.20;
+      float vel = blockDistance * 0.20;//was 20
       if (vel < 0.1) vel = 0.1;
       if (vel > 0.2) vel = 0.2;
 
       result.pd.cmdVel = vel;
       result.pd.cmdAngularError = -blockYawError;
       timeOut = false;
-
+      nTargetsSeen = 0;
       return result;
     }
     else if (!lockTarget) //if a target hasn't been locked lock it and enter a counting state while slowly driving forward.
     {
       lockTarget = true;
-      result.pd.cmdVel = 0.18;
+      result.pd.cmdVel = 11.5;//was 15
       result.pd.cmdAngularError= 0.0;
       timeOut = true;
       ignoreCenterSonar = true;
     }
     else if (Td > raise_time_begin) //raise the wrist
     {
-      result.pd.cmdVel = -0.15;
+      result.pd.cmdVel = 0.0;
       result.pd.cmdAngularError= 0.0;
       result.wristAngle = 0;
     }
@@ -319,20 +265,20 @@ Result PickUpController::DoWork()
     {
       result.pd.cmdVel = 0.0;
       result.pd.cmdAngularError= 0.0;
-      result.fingerAngle = 0;
-      return result;
+      result.fingerAngle = 0.0
+; // Was 0. **************************************************************
+      result.wristAngle = 0.8;
+	return result;
     }
 
 
     // the magic numbers compared to Td must be in order from greater(top) to smaller(bottom) numbers
-    if (Td > target_reaquire_begin && timeOut)
-    {
+    if (Td > target_reaquire_begin && timeOut) {
       lockTarget = false;
       ignoreCenterSonar = true;
-    }
 
-    //if enough time has passed enter a recovery state to re-attempt a pickup
-    else if (Td > lower_gripper_time_begin && timeOut)
+    }
+    else if (Td > lower_gripper_time_begin && timeOut) //if enough time has passed enter a recovery state to re-attempt a pickup
     {
       result.pd.cmdVel = -0.15;
       result.pd.cmdAngularError= 0.0;
@@ -341,8 +287,8 @@ Result PickUpController::DoWork()
       result.wristAngle = 0;
     }
 
-    //if no targets are found after too long a period go back to search pattern
-    if (Td > target_pickup_task_time_limit && timeOut)
+
+    if (Td > target_pickup_task_time_limit && timeOut) //if no targets are found after too long a period go back to search pattern
     {
       Reset();
       interupted = true;
@@ -355,8 +301,7 @@ Result PickUpController::DoWork()
   return result;
 }
 
-bool PickUpController::HasWork()
-{
+bool PickUpController::HasWork() {
   return targetFound;
 }
 
